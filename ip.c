@@ -17,7 +17,13 @@
 
 #define IP_HDR_OFFSET_MASK 0x1fff
 
-const ip_addr_t IP_ADDR_ANY = 0x00000000;       /* 0.0.0.0 */
+struct ip_protocol {
+    struct ip_protocol *next;
+    uint8_t protocol;
+    ip_protocol_handler_t handler;
+};
+
+const ip_addr_t IP_ADDR_ANY       = 0x00000000; /* 0.0.0.0 */
 const ip_addr_t IP_ADDR_BROADCAST = 0xffffffff; /* 255.255.255.255 */
 
 /*
@@ -25,6 +31,7 @@ const ip_addr_t IP_ADDR_BROADCAST = 0xffffffff; /* 255.255.255.255 */
  *       you need to protect these lists with a mutex.
  */
 static struct ip_iface *ifaces;
+static struct ip_protocol *protocols;
 
 int ip_addr_pton(const char *p, ip_addr_t *n)
 {
@@ -129,6 +136,33 @@ ip_iface_select(ip_addr_t addr)
     return entry;
 }
 
+/*
+ * NOTE: must not be call after net_run()
+ */
+int
+ip_protocol_register(uint8_t protocol, ip_protocol_handler_t handler)
+{
+    struct ip_protocol *entry;
+
+    for (entry = protocols; entry; entry = entry->next) {
+        if (entry->protocol == protocol) {
+            errorf("already exists, protocl=%u", protocol);
+            return -1;
+        }
+    }
+    entry = memory_alloc(sizeof(*entry));
+    if (!entry) {
+        errorf("memory_alloc() failure");
+        return -1;
+    }
+    entry->protocol = protocol;
+    entry->handler = handler;
+    entry->next = protocols;
+    protocols = entry;
+    infof("success, protocol=%u", protocol);
+    return 0;
+}
+
 static void
 ip_print(const uint8_t *data, size_t len)
 {
@@ -169,6 +203,7 @@ ip_input(const uint8_t *data, size_t len, struct net_device *dev)
     uint16_t hlen, total, offset;
     struct ip_iface *iface;
     char addr[IP_ADDR_STR_LEN];
+    struct ip_protocol *proto;
 
     debugf("dev=%s, len=%zu", dev->name, len);
     if (len < IP_HDR_SIZE_MIN)
@@ -222,6 +257,13 @@ ip_input(const uint8_t *data, size_t len, struct net_device *dev)
     }
     debugf("permit, dev=%s, iface=%s", dev->name, ip_addr_ntop(iface->unicast, addr, sizeof(addr)));
     ip_print(data, total);
+    for (proto = protocols; proto; proto = proto->next) {
+        if (proto->protocol == hdr->protocol) {
+            proto->handler(hdr, data + hlen, total - hlen, iface);
+            return;
+        }
+    }
+    /* unsupported protocol */
 }
 
 static int
