@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #include "net.h"
 
@@ -19,7 +20,8 @@
 
 typedef uint32_t ip_addr_t;
 
-struct ip_hdr {
+struct ip_hdr
+{
     uint8_t vhl;
     uint8_t tos;
     uint16_t total;
@@ -32,7 +34,8 @@ struct ip_hdr {
     ip_addr_t dst;
 };
 
-struct ip_iface {
+struct ip_iface
+{
     struct net_iface iface;
     struct ip_iface *next;
     ip_addr_t unicast;
@@ -54,6 +57,9 @@ extern int
 ip_iface_register(struct net_device *dev, struct ip_iface *iface);
 extern struct ip_iface *
 ip_iface_select(ip_addr_t addr);
+
+extern ssize_t
+ip_output(uint8_t protocol, const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst);
 
 extern int
 ip_init(void);
