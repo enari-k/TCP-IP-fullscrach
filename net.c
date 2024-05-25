@@ -85,7 +85,13 @@ int net_device_output(struct net_device *dev, uint16_t type, const uint8_t *data
     return 0;
 }
 
-int net_init(void)
+int
+net_input(uint16_t type, const uint8_t *data, size_t len, struct net_device *dev)
+{
+}
+
+int
+net_init(void)
 {
     infof("initializa...");
     if (platform_init() == -1)
