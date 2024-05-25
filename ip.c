@@ -10,6 +10,7 @@
 #include "util.h"
 #include "net.h"
 #include "ip.h"
+#include "icmp.h"
 
 #define IP_HDR_FLAG_MF 0x2000 /* more flagments flag */
 #define IP_HDR_FLAG_DF 0x4000 /* don't flagment flag */
@@ -17,13 +18,14 @@
 
 #define IP_HDR_OFFSET_MASK 0x1fff
 
-struct ip_protocol {
+struct ip_protocol
+{
     struct ip_protocol *next;
     uint8_t protocol;
     ip_protocol_handler_t handler;
 };
 
-const ip_addr_t IP_ADDR_ANY       = 0x00000000; /* 0.0.0.0 */
+const ip_addr_t IP_ADDR_ANY = 0x00000000;       /* 0.0.0.0 */
 const ip_addr_t IP_ADDR_BROADCAST = 0xffffffff; /* 255.255.255.255 */
 
 /*
@@ -139,19 +141,21 @@ ip_iface_select(ip_addr_t addr)
 /*
  * NOTE: must not be call after net_run()
  */
-int
-ip_protocol_register(uint8_t protocol, ip_protocol_handler_t handler)
+int ip_protocol_register(uint8_t protocol, ip_protocol_handler_t handler)
 {
     struct ip_protocol *entry;
 
-    for (entry = protocols; entry; entry = entry->next) {
-        if (entry->protocol == protocol) {
+    for (entry = protocols; entry; entry = entry->next)
+    {
+        if (entry->protocol == protocol)
+        {
             errorf("already exists, protocl=%u", protocol);
             return -1;
         }
     }
     entry = memory_alloc(sizeof(*entry));
-    if (!entry) {
+    if (!entry)
+    {
         errorf("memory_alloc() failure");
         return -1;
     }
@@ -257,13 +261,24 @@ ip_input(const uint8_t *data, size_t len, struct net_device *dev)
     }
     debugf("permit, dev=%s, iface=%s", dev->name, ip_addr_ntop(iface->unicast, addr, sizeof(addr)));
     ip_print(data, total);
-    for (proto = protocols; proto; proto = proto->next) {
-        if (proto->protocol == hdr->protocol) {
+    for (proto = protocols; proto; proto = proto->next)
+    {
+        if (proto->protocol == hdr->protocol)
+        {
             proto->handler(hdr, data + hlen, total - hlen, iface);
             return;
         }
     }
     /* unsupported protocol */
+    if (hlen + 8 <= total)
+    {
+        /*
+         * It should not be sent in response to ICMP error messages,
+         * but ICMP is always registered and will not reach this point.
+         */
+        icmp_output(ICMP_TYPE_DEST_UNREACH, ICMP_CODE_PROTO_UNREACH, 0, data, hlen + 8,
+                    iface->unicast, hdr->src);
+    }
 }
 
 static int
@@ -331,7 +346,7 @@ ip_output(uint8_t protocol, const uint8_t *data, size_t len, ip_addr_t src, ip_a
 
     ip_addr_ntop(src, addr1, sizeof(addr1));
     ip_addr_ntop(src, addr2, sizeof(addr2));
-    debugf("%s => $s, protocol=%d, len=%zu", addr1, addr2, protocol, len);
+    debugf("%s => %s, protocol=%d, len=%zu", addr1, addr2, protocol, len);
     if (src == IP_ADDR_ANY)
     {
         errorf("ip routing does not implement");
