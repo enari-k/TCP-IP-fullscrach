@@ -23,8 +23,14 @@
 #define NET_DEVICE_IS_UP(x) ((x)->flags & NET_DEVICE_FLAG_UP)
 #define NET_DEVICE_STATE(x) (NET_DEVICE_IS_UP(x) ? "UP" : "DOWN")
 
-struct net_device
-{
+/*
+ * NOTE: use same value as the Ethernet types
+ */
+#define NET_PROTOCOL_TYPE_IP   0x0800
+#define NET_PROTOCOL_TYPE_ARP  0x0806
+#define NTT_PROTOCOL_TYPE_IPV6 0x86dd
+
+struct net_device {
     struct net_device *next;
     unsigned int index;
     char name[IFNAMSIZ];
@@ -46,12 +52,17 @@ struct net_device_ops
     int (*output)(struct net_device *dev, uint16_t type, const uint8_t *data, size_t len, const void *dst);
 };
 
+typedef void (*net_protocol_handler_t)(const uint8_t *data, size_t len, struct net_device *dev);
+
 extern struct net_device *
 net_device_alloc(void);
 extern int
 net_device_register(struct net_device *dev);
 extern int
 net_device_output(struct net_device *dev, uint16_t type, const uint8_t *data, size_t len, const void *dst);
+
+extern int
+net_protocol_register(uint16_t type, net_protocol_handler_t handler);
 
 extern int
 net_input(uint16_t type, const uint8_t *data, size_t len, struct net_device *dev);
