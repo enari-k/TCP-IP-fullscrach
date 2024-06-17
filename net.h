@@ -84,6 +84,9 @@ net_protocol_register(uint16_t type, net_protocol_handler_t handler);
 extern int
 net_input(uint16_t type, const uint8_t *data, size_t len, struct net_device *dev);
 
+extern void
+net_softirq_handler(unsigned int irq, void *arg);
+
 extern int
 net_init(void);
 extern int
