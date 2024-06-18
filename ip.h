@@ -18,6 +18,15 @@
 #define IP_ADDR_LEN 4
 #define IP_ADDR_STR_LEN 16 /* "ddd.ddd.ddd.ddd\0" */
 
+#define IP_ENDP_STR_LEN (IP_ADDR_STR_LEN + 6) /* "ddd.ddd.ddd.ddd:ddddd\0" */
+
+/*
+ * Dynamic Source Ports
+ *  - see https://tools.ietf.org/html/rfc6335
+ */
+#define IP_ENDP_DYNAMIC_PORT_MIN 49152
+#define IP_ENDP_DYNAMIC_PORT_MAX 65535
+
 /*
  * Assigned Internet Protocol Numbers.
  *  - see https://www.iana.org/assignments/protocol-numbers/protocol-numbers.txt
@@ -28,8 +37,12 @@
 
 typedef uint32_t ip_addr_t;
 
-struct ip_hdr
-{
+typedef struct {
+    ip_addr_t addr;
+    uint16_t port;
+} ip_endp_t;
+
+struct ip_hdr {
     uint8_t vhl;
     uint8_t tos;
     uint16_t total;
@@ -61,6 +74,10 @@ extern int
 ip_addr_pton(const char *p, ip_addr_t *n);
 extern char *
 ip_addr_ntop(ip_addr_t n, char *p, size_t size);
+extern int
+ip_endp_pton(const char *p, ip_endp_t *n);
+extern char *
+ip_endp_ntop(ip_endp_t n, char *p, size_t size);
 
 extern int
 ip_route_set_default_gateway(struct ip_iface *iface, const char *gateway);
