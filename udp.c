@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/param.h>
+#include <errno.h>
 
 #include "platform.h"
 
@@ -235,6 +236,11 @@ udp_input(const struct ip_hdr *iphdr, const uint8_t *data, size_t len, struct ip
     lock_release(&lock);
 }
 
+static ssize_t
+udp_output(ip_endp_t src, ip_endp_t dst, const uint8_t *data, size_t len)
+{
+}
+
 int
 udp_init(void)
 {
@@ -318,4 +324,14 @@ udp_cmd_bind(int desc, ip_endp_t local)
         desc, ip_endp_ntop(pcb->local, endp1, sizeof(endp1)));
     lock_release(&lock);
     return 0;
+}
+
+ssize_t
+udp_cmd_recvfrom(int desc, uint8_t *buf, size_t size, ip_endp_t *remote)
+{
+}
+
+ssize_t
+udp_cmd_sendto(int desc, uint8_t *data, size_t len, ip_endp_t remote)
+{
 }
