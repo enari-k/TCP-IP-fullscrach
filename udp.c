@@ -6,9 +6,17 @@
 #include <sys/types.h>
 #include <sys/param.h>
 
+#include "platform.h"
+
 #include "util.h"
 #include "ip.h"
 #include "udp.h"
+
+#define UDP_PCB_SIZE 16
+
+#define UDP_PCB_STATE_FREE    0
+#define UDP_PCB_STATE_OPEN    1
+#define UDP_PCB_STATE_CLOSING 2
 
 struct pseudo_hdr {
     uint32_t src;
@@ -24,6 +32,53 @@ struct udp_hdr {
     uint16_t len;
     uint16_t sum;
 };
+
+struct udp_pcb {
+    int state;
+    ip_endp_t local;
+    struct queue queue; /* receive queue */
+};
+
+struct udp_queue_entry {
+    struct queue_entry entry;
+    ip_endp_t remote;
+    uint16_t len;
+    /* data bytes exists after this structure. */
+};
+
+static lock_t lock = LOCK_INITIALIZER;
+static struct udp_pcb pcbs[UDP_PCB_SIZE];
+
+/*
+ * Protocol Control Block (PCB)
+ *
+ * NOTE: PCB functions must be called after locked
+ */
+
+static int
+udp_pcb_desc(struct udp_pcb *pcb)
+{
+}
+
+static struct udp_pcb *
+udp_pcb_get(int desc)
+{
+}
+
+static struct udp_pcb *
+udp_pcb_alloc(void)
+{
+}
+
+static void
+udp_pcb_release(struct udp_pcb *pcb)
+{
+}
+
+static struct udp_pcb *
+udp_pcb_select(ip_endp_t key)
+{
+}
 
 static void
 udp_print(const uint8_t *data, size_t len)
@@ -101,4 +156,23 @@ udp_init(void)
         return -1;
     }
     return 0;
+}
+
+/*
+ * User Commands
+ */
+
+int
+udp_cmd_open(void)
+{
+}
+
+int
+udp_cmd_close(int desc)
+{
+}
+
+int
+udp_cmd_bind(int desc, ip_endp_t local)
+{
 }
