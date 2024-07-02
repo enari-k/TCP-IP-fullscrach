@@ -3,6 +3,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+
+#include "platform.h"
 
 #include "util.h"
 #include "ip.h"
@@ -17,6 +20,30 @@
 
 #define TCP_FLG_IS(x, y) ((x & 0x3f) == (y))
 #define TCP_FLG_ISSET(x, y) ((x & 0x3f) & (y) ? 1 : 0)
+
+#define TCP_PCB_SIZE 16
+
+#define TCP_STATE_NONE         0
+#define TCP_STATE_CLOSED       1
+#define TCP_STATE_LISTEN       2
+#define TCP_STATE_SYN_SENT     3
+#define TCP_STATE_SYN_RECEIVED 4
+#define TCP_STATE_ESTABLISHED  5
+#define TCP_STATE_FIN_WAIT1    6
+#define TCP_STATE_FIN_WAIT2    7
+#define TCP_STATE_CLOSE_WAIT   8
+#define TCP_STATE_CLOSING      9
+#define TCP_STATE_LAST_ACK    10
+#define TCP_STATE_TIME_WAIT   11
+
+#define TCP_STATE_CHANGE(x, y)          \
+    do {                                \
+        debugf("desc=%d, %s => %s",     \
+            tcp_pcb_desc((x)),          \
+            tcp_state_ntoa((x)->state), \
+            tcp_state_ntoa((y)));       \
+        (x)->state = (y);               \
+    } while (0);
 
 struct pseudo_hdr {
     uint32_t src;
@@ -37,6 +64,45 @@ struct tcp_hdr {
     uint16_t sum;
     uint16_t up;
 };
+
+struct snd_vars {
+    uint32_t nxt;
+    uint32_t una;
+    uint16_t wnd;
+    uint16_t up;
+    uint32_t wl1;
+    uint32_t wl2;
+};
+
+struct rcv_vars {
+    uint32_t nxt;
+    uint16_t wnd;
+    uint16_t up;
+};
+
+struct tcp_pcb {
+    int state;
+    ip_endp_t local;
+    ip_endp_t remote;
+    struct snd_vars snd;
+    uint32_t iss;
+    struct rcv_vars rcv;
+    uint32_t irs;
+    uint16_t mss;
+    uint8_t buf[65535]; /* receive buffer */
+    struct sched_task task;
+};
+
+struct seg_info {
+    uint32_t seq;
+    uint32_t ack;
+    uint16_t len;
+    uint16_t wnd;
+    uint16_t up;
+};
+
+static lock_t lock = LOCK_INITIALIZER; /* for PCBs*/
+static struct tcp_pcb pcbs[TCP_PCB_SIZE];
 
 static char *
 tcp_flg_ntoa(uint8_t flg)
@@ -73,6 +139,39 @@ tcp_opt_ntoa(uint8_t opt)
         return "Timestamps";
     default:
         return "Unknown";
+    }
+}
+
+static char *
+tcp_state_ntoa(int state)
+{
+    switch (state) {
+    case TCP_STATE_NONE:
+        return "NONE";
+    case TCP_STATE_CLOSED:
+        return "CLOSED";
+    case TCP_STATE_LISTEN:
+        return "LISTEN";
+    case TCP_STATE_SYN_SENT:
+        return "SYN_SENT";
+    case TCP_STATE_SYN_RECEIVED:
+        return "SYN_RECEIVED";
+    case TCP_STATE_ESTABLISHED:
+        return "ESTABLISHED";
+    case TCP_STATE_FIN_WAIT1:
+        return "FIN_WAIT1";
+    case TCP_STATE_FIN_WAIT2:
+        return "FIN_WAIT2";
+    case TCP_STATE_CLOSE_WAIT:
+        return "CLOSE_WAIT";
+    case TCP_STATE_CLOSING:
+        return "CLOSING";
+    case TCP_STATE_LAST_ACK:
+        return "LAST_ACK";
+    case TCP_STATE_TIME_WAIT:
+        return "TIME_WAIT";
+    default:
+        return "UNKNOWN";
     }
 }
 
@@ -122,6 +221,50 @@ tcp_print(const uint8_t *data, size_t len)
     hexdump(stderr, data, len);
 #endif
     funlockfile(stderr);
+}
+
+/*
+ * TCP Protocol Control Block (PCB)
+ *
+ * NOTE: TCP PCB functions must be called after locked
+ */
+
+static int
+tcp_pcb_desc(struct tcp_pcb *pcb)
+{
+}
+
+static struct tcp_pcb *
+tcp_pcb_get(int desc)
+{
+}
+
+static struct tcp_pcb *
+tcp_pcb_alloc(void)
+{
+}
+
+static void
+tcp_pcb_release(struct tcp_pcb *pcb)
+{
+}
+
+static struct tcp_pcb *
+tcp_pcb_select(ip_endp_t key1, ip_endp_t key2)
+{
+}
+
+static ssize_t
+tcp_output_segment(uint32_t seq, uint32_t ack, uint8_t flg, uint16_t wnd,
+                   const uint8_t *data, size_t len, ip_endp_t local, ip_endp_t remote)
+{
+}
+
+/* rfc793 - section 3.9 [Event Processing > SEGMENT ARRIVES] */
+static void
+tcp_segment_arrives(struct seg_info *seg, uint8_t flags, const uint8_t *data, size_t len,
+                    ip_endp_t local, ip_endp_t remote)
+{
 }
 
 static void
