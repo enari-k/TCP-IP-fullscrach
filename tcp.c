@@ -51,6 +51,7 @@
 
 #define TCP_DEFAULT_RTO 200000 /* micro seconds */
 #define TCP_RETRANS_DEADLINE 12 /* seconds */
+#define TCP_TIMEWAIT_SEC 30 /* substitute for 2MSL */
 
 struct pseudo_hdr {
     uint32_t src;
@@ -500,6 +501,11 @@ tcp_output(struct tcp_pcb *pcb, uint8_t flg, const uint8_t *data, size_t len)
     }
     return tcp_output_segment(seq, pcb->rcv.nxt, flg, pcb->rcv.wnd, data, len,
                 pcb->local, pcb->remote);
+}
+
+static void
+tcp_set_timewait_timer(struct tcp_pcb *pcb)
+{
 }
 
 /* rfc793 - section 3.9 [Event Processing > SEGMENT ARRIVES] */
