@@ -48,8 +48,10 @@
         (x)->state = (y);                  \
     } while (0);
 
-struct pseudo_hdr
-{
+#define TCP_DEFAULT_RTO 200000 /* micro seconds */
+#define TCP_RETRANS_DEADLINE 12 /* seconds */
+
+struct pseudo_hdr {
     uint32_t src;
     uint32_t dst;
     uint8_t zero;
@@ -101,8 +103,18 @@ struct tcp_pcb
     struct sched_task task;
 };
 
-struct seg_info
-{
+struct tcp_queue_entry {
+    struct queue_entry entry;
+    struct timeval first;
+    struct timeval last;
+    unsigned int rto; /* micro seconds */
+    uint32_t seq;
+    uint8_t flg;
+    size_t len;
+    /* data bytes exists after this structure. */
+};
+
+struct seg_info {
     uint32_t seq;
     uint32_t ack;
     uint16_t len;
@@ -362,6 +374,27 @@ tcp_output_segment(uint32_t seq, uint32_t ack, uint8_t flg, uint16_t wnd,
         return -1;
     }
     return len;
+}
+
+/*
+ * TCP Retransmit
+ *
+ * NOTE: TCP Retransmit functions must be called after locked
+ */
+
+static int
+tcp_retrans_queue_add(struct tcp_pcb *pcb, uint32_t seq, uint8_t flg, const uint8_t *data, size_t len)
+{
+}
+
+static void
+tcp_retrans_queue_cleanup(struct tcp_pcb *pcb)
+{
+}
+
+static void
+tcp_retrans_emit(void *arg, struct queue_entry *_entry)
+{
 }
 
 static ssize_t
@@ -697,7 +730,13 @@ tcp_input(const struct ip_hdr *iphdr, const uint8_t *data, size_t len, struct ip
     return;
 }
 
-int tcp_init(void)
+static void
+tcp_timer(void)
+{
+}
+
+int
+tcp_init(void)
 {
     if (ip_protocol_register(IP_PROTOCOL_TCP, tcp_input) == -1)
     {
