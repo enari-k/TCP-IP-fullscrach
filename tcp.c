@@ -1222,6 +1222,11 @@ AGAIN:
 }
 
 int
+tcp_cmd_socket(void)
+{
+}
+
+int
 tcp_cmd_close(int desc)
 {
     struct tcp_pcb *pcb;
@@ -1281,6 +1286,26 @@ tcp_cmd_close(int desc)
     }
     lock_release(&lock);
     return 0;
+}
+
+int
+tcp_cmd_connect(int desc, ip_endp_t remote)
+{
+}
+
+int
+tcp_cmd_bind(int desc, ip_endp_t local)
+{
+}
+
+int
+tcp_cmd_listen(int desc, int backlog)
+{
+}
+
+int
+tcp_cmd_accept(int desc, ip_endp_t *remote)
+{
 }
 
 ssize_t
