@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -24,16 +26,19 @@ setup(void)
     struct sigaction sa = {0};
 
     sa.sa_handler = on_signal;
-    if (sigaction(SIGINT, &sa, NULL) == -1) {
+    if (sigaction(SIGINT, &sa, NULL) == -1)
+    {
         errorf("sigaction() %s", strerror(errno));
         return -1;
     }
     infof("setup protocol stack...");
-    if (net_init() == -1) {
+    if (net_init() == -1)
+    {
         errorf("net_init() failure");
         return -1;
     }
-    if (net_run() == -1) {
+    if (net_run() == -1)
+    {
         errorf("net_run() failure");
         return -1;
     }
@@ -44,7 +49,8 @@ static int
 cleanup(void)
 {
     infof("cleanup protocol stack...");
-    if (net_shutdown() == -1) {
+    if (net_shutdown() == -1)
+    {
         errorf("net_shutdown() failure");
         return -1;
     }
@@ -54,20 +60,27 @@ cleanup(void)
 static int
 app_main(void)
 {
+    debugf("press Ctrl+C to terminate");
+    while (!terminate)
+    {
+        sleep(1);
+    }
+    debugf("terminate");
     return 0;
 }
 
-int
-main(void)
+int main(void)
 {
     int ret;
 
-    if (setup() == -1) {
+    if (setup() == -1)
+    {
         errorf("setup() failure");
         return -1;
     }
     ret = app_main();
-    if (cleanup() == -1) {
+    if (cleanup() == -1)
+    {
         errorf("cleanup() failure");
         return -1;
     }
