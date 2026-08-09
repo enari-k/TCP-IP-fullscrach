@@ -11,6 +11,7 @@
 #include "net.h"
 #include "ip.h"
 #include "icmp.h"
+#include "arp.h"
 
 #define IP_HDR_FLAG_MF 0x2000 /* more flagments flag */
 #define IP_HDR_FLAG_DF 0x4000 /* don't flagment flag */
@@ -286,6 +287,7 @@ ip_output_device(struct ip_iface *iface, const uint8_t *data, size_t len, ip_add
 {
     char addr[IP_ADDR_STR_LEN];
     uint8_t hwaddr[NET_DEVICE_ADDR_LEN] = {};
+    int ret;
 
     ip_addr_ntop(target, addr, sizeof(addr));
     debugf("dev=%s, len=%zu, target=%s", NET_IFACE(iface)->dev->name, len, addr);
@@ -297,8 +299,10 @@ ip_output_device(struct ip_iface *iface, const uint8_t *data, size_t len, ip_add
         }
         else
         {
-            errorf("ARP does not implement");
-            return -1;
+            ret = arp_resolve(NET_IFACE(iface), target, hwaddr);
+            if (ret != ARP_RESOLVE_FOUND) {
+                return ret;
+            }
         }
     }
     return net_device_output(NET_IFACE(iface)->dev, NET_PROTOCOL_TYPE_IP, data, len, hwaddr);
