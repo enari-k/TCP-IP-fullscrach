@@ -12,6 +12,8 @@ struct net_protocol
 {
     struct net_protocol *next;
     uint16_t type;
+    lock_t lock;
+    struct queue queue; /* input queue */
     net_protocol_handler_t handler;
 };
 
@@ -187,6 +189,8 @@ net_protocol_register(uint16_t type, net_protocol_handler_t handler)
         return -1;
     }
     proto->type = type;
+    lock_init(&proto->lock);
+    queue_init(&proto->queue);
     proto->handler = handler;
     proto->next = protocols;
     protocols = proto;
@@ -197,11 +201,43 @@ net_protocol_register(uint16_t type, net_protocol_handler_t handler)
 static struct net_protocol_queue_entry *
 net_protocol_queue_push(struct net_protocol *proto, const uint8_t *data, size_t len, struct net_device *dev)
 {
+    struct net_protocol_queue_entry *entry;
+
+    entry = memory_alloc(sizeof(*entry) + len);
+    if (!entry)
+    {
+        errorf("memory_alloc() failure");
+        return NULL;
+    }
+    entry->dev = dev;
+    entry->len = len;
+    memcpy(entry+1, data, len);
+    lock_acquire(&proto->lock);
+    if (!queue_push(&proto->queue, (struct queue_entry *)entry))
+    {
+        lock_release(&proto->lock);
+        return NULL;
+    }
+    debugf("success, proto=0x%04x queue.num=%d", proto->type, proto->queue.num);
+    lock_release(&proto->lock);
+    return entry;
 }
 
 static struct net_protocol_queue_entry *
 net_protocol_queue_pop(struct net_protocol *proto)
 {
+    struct net_protocol_queue_entry *entry;
+
+    lock_acquire(&proto->lock);
+    entry = (struct net_protocol_queue_entry *)queue_pop(&proto->queue);
+    if (!entry)
+    {
+        lock_release(&proto->lock);
+        return NULL;
+    }
+    debugf("success, proto=0x%04x queue.num=%d", proto->type, proto->queue.num);
+    lock_release(&proto->lock);
+    return entry;
 }
 
 int
@@ -215,7 +251,12 @@ net_input(uint16_t type, const uint8_t *data, size_t len, struct net_device *dev
     {
         if (proto->type == type)
         {
-            proto->handler(data, len, dev);
+            if (!net_protocol_queue_push(proto, data, len, dev))
+            {
+                errorf("net_protocol_queue_push() failure");
+                return -1;
+            }
+            intr_raise(INTR_IRQ_SOFT);
             return 0;
         }
     }
@@ -226,6 +267,24 @@ net_input(uint16_t type, const uint8_t *data, size_t len, struct net_device *dev
 void
 net_softirq_handler(unsigned int irq, void *arg)
 {
+    struct net_protocol *proto;
+    struct net_protocol_queue_entry *entry;
+
+    (void)irq;
+    (void)arg;
+    for (proto = protocols; proto; proto = proto->next)
+    {
+        while (1)
+        {
+            entry = net_protocol_queue_pop(proto);
+            if (!entry)
+            {
+                break;
+            }
+            proto->handler((uint8_t *)(entry+1), entry->len, entry->dev);
+            memory_free(entry);
+        }
+    }
 }
 
 #include "arp.h"
