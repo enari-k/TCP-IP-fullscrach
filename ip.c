@@ -89,11 +89,61 @@ ip_addr_ntop(ip_addr_t n, char *p, size_t size)
 static struct ip_route *
 ip_route_add(ip_addr_t network, ip_addr_t netmask, ip_addr_t nexthop, struct ip_iface *iface)
 {
+    char addr1[IP_ADDR_STR_LEN];
+    char addr2[IP_ADDR_STR_LEN];
+    char addr3[IP_ADDR_STR_LEN];
+    char addr4[IP_ADDR_STR_LEN];
+    struct ip_route *route;
+
+    if (nexthop != IP_ADDR_ANY)
+    {
+        infof("%s/%s via %s dev %s src %s",
+                ip_addr_ntop(network, addr1, sizeof(addr1)),
+                ip_addr_ntop(network, addr1, sizeof(addr2)),
+                ip_addr_ntop(network, addr1, sizeof(addr3)),
+                NET_IFACE(iface)->dev->name,
+                ip_addr_ntop(iface->unicast, addr4, sizeof(addr4)));
+    }
+    else
+    {
+        infof("5s/%s dev %s src %s",
+              ip_addr_ntop(network, addr1, sizeof(addr1)),
+              ip_addr_ntop(network, addr1, sizeof(addr2)),
+              NET_IFACE(iface)->dev->name,
+              ip_addr_ntop(iface->unicast, addr4, sizeof(addr4))
+        );
+    }
+    route = memory_alloc(sizeof(*route));
+    if (!route)
+    {
+        errorf("memory_alloc() failure");
+        return NULL;
+    }
+    route->network = network;
+    route->netmask = netmask;
+    route->nexthop = nexthop;
+    route->iface = iface;
+    route->next = routes;
+    routes = route;
+    return route;
 }
 
 static struct ip_route *
 ip_route_lookup(ip_addr_t dst)
 {
+    struct ip_route *route, *candidate = NULL;
+
+    for (route = routes; route; route = route->next)
+    {
+        if ((dst & route->netmask) == route->network)
+        {
+            if(!candidate || ntoh32(candidate->netmask) < ntoh32(route->netmask))
+            {
+                candidate = route;
+            }
+        }
+    }
+    return candidate;
 }
 
 /*
@@ -102,11 +152,32 @@ ip_route_lookup(ip_addr_t dst)
 int
 ip_route_set_default_gateway(struct ip_iface *iface, const char *gateway)
 {
+    ip_addr_t nexthop;
+
+    if (ip_addr_pton(gateway, &nexthop) == -1)
+    {
+        errorf("ip_addr_pton() failure, addr=%s", nexthop);
+        return -1;
+    }
+    if (!ip_route_add(IP_ADDR_ANY, IP_ADDR_ANY, nexthop, iface))
+    {
+        errorf("ip_route_add() failure");
+        return -1;
+    }
+    return 0;
 }
 
 struct ip_iface *
 ip_route_get_iface(ip_addr_t dst)
 {
+    struct ip_route *route;
+
+    route = ip_route_lookup(dst);
+    if (!route)
+    {
+        return NULL;
+    }
+    return route->iface;
 }
 
 struct ip_iface *
@@ -152,6 +223,11 @@ int ip_iface_register(struct net_device *dev, struct ip_iface *iface)
     if (net_device_add_iface(dev, NET_IFACE(iface)) == -1)
     {
         errorf("net_device_add_iface() failure");
+        return -1;
+    }
+    if (!ip_route_add(iface->unicast & iface->netmask, iface->netmask, IP_ADDR_ANY, iface))
+    {
+        errorf("ip_route_add() failure");
         return -1;
     }
     iface->next = ifaces;
@@ -378,6 +454,7 @@ ip_output(uint8_t protocol, const uint8_t *data, size_t len, ip_addr_t src, ip_a
 {
     char addr1[IP_ADDR_STR_LEN];
     char addr2[IP_ADDR_STR_LEN];
+    struct ip_route *route;
     struct ip_iface *iface;
     uint16_t id;
     ssize_t plen;
@@ -386,20 +463,21 @@ ip_output(uint8_t protocol, const uint8_t *data, size_t len, ip_addr_t src, ip_a
     ip_addr_ntop(src, addr1, sizeof(addr1));
     ip_addr_ntop(src, addr2, sizeof(addr2));
     debugf("%s => %s, protocol=%d, len=%zu", addr1, addr2, protocol, len);
-    if (src == IP_ADDR_ANY)
+    if (src == IP_ADDR_ANY && dst == IP_ADDR_BROADCAST)
     {
-        errorf("ip routing does not implement");
+        errorf("source address is required for broadcast addresses");
         return -1;
     }
-    iface = ip_iface_select(src);
-    if (!iface)
+    route = ip_route_lookup(dst);
+    if (!route)
     {
-        errorf("iface not found, src=%s", addr1);
+        errorf("no route to host, dst=%s", addr2);
         return -1;
     }
-    if ((dst & iface->netmask) != (iface->unicast & iface->netmask) && dst != IP_ADDR_BROADCAST)
+    iface = route->iface;
+    if (src != IP_ADDR_ANY && src != iface->unicast)
     {
-        errorf("not reached, dst=%s", addr2);
+        errorf("unable to output with specified source address, src=%s", addr1);
         return -1;
     }
     if (NET_IFACE(iface)->dev->mtu < IP_HDR_SIZE_MIN + len)
@@ -415,7 +493,7 @@ ip_output(uint8_t protocol, const uint8_t *data, size_t len, ip_addr_t src, ip_a
         errorf("ip_build_packet() failure");
         return -1;
     }
-    if (ip_output_device(iface, buf, plen, dst) == -1)
+    if (ip_output_device(iface, buf, plen, route->nexthop ? route->nexthop : dst) == -1)
     {
         errorf("ip_output_device() failure");
         return -1;

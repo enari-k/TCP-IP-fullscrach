@@ -78,6 +78,11 @@ setup(void)
         errorf("ip_iface_register() failure");
         return -1;
     }
+    if (ip_route_set_default_gateway(iface, DEFAULT_GATEWAY) == -1)
+    {
+        errorf("ip_route_set_default_gateway() failure");
+        return -1;
+    }
     if (net_run() == -1)
     {
         errorf("net_run() failure");
@@ -107,8 +112,8 @@ app_main(void)
     uint32_t val;
     uint8_t data[] = {'T', 'E', 'S', 'T'};
 
-    ip_addr_pton("192.0.2.2", &src);
-    ip_addr_pton("192.0.2.1", &dst);
+    src = IP_ADDR_ANY;
+    ip_addr_pton("8.8.8.8", &dst);
     id = getpid() % UINT16_MAX;
     debugf("press Ctrl+C to terminate");
     while (!terminate)

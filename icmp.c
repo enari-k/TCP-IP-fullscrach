@@ -156,7 +156,7 @@ int icmp_output(uint8_t type, uint8_t code, uint32_t val, const uint8_t *data, s
     }
     hdr = (struct icmp_hdr *)buf;
     hdr->icmp_type = type;
-    hdr->icmp_code = type;
+    hdr->icmp_code = code;
     hdr->icmp_sum = 0;
     hdr->dep = val;
     memcpy(hdr + 1, data, len);
