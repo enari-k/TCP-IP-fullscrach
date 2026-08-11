@@ -107,23 +107,9 @@ cleanup(void)
 static int
 app_main(void)
 {
-    ip_addr_t src, dst;
-    uint16_t id, seq = 0;
-    uint32_t val;
-    uint8_t data[] = {'T', 'E', 'S', 'T'};
-
-    src = IP_ADDR_ANY;
-    ip_addr_pton("8.8.8.8", &dst);
-    id = getpid() % UINT16_MAX;
     debugf("press Ctrl+C to terminate");
     while (!terminate)
     {
-        val = hton32(id << 16 | ++seq);
-        if (icmp_output(ICMP_TYPE_ECHO, 0, val, data, sizeof(data), src, dst) == -1)
-        {
-            errorf("icmp_output() failure");
-            break;
-        }
         sleep(1);
     }
     debugf("terminate");
