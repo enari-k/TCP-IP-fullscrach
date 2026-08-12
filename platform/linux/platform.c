@@ -21,6 +21,10 @@ int platform_init(void)
     {
         return -1;
     }
+    if (sched_init() == -1)
+    {
+        return -1;
+    }
     return 0;
 }
 
@@ -34,6 +38,10 @@ int platform_run(void)
     {
         return -1;
     }
+    if (sched_run() == -1)
+    {
+        return -1;
+    }
     return 0;
 }
 
@@ -44,6 +52,10 @@ int platform_shutdown(void)
         return -1;
     }
     if (timer_shutdown() == -1)
+    {
+        return -1;
+    }
+    if (sched_shutdown() == -1)
     {
         return -1;
     }
