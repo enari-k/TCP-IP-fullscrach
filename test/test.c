@@ -108,80 +108,14 @@ cleanup(void)
     return 0;
 }
 
-static void *
-receiver(void *arg)
-{
-    int desc;
-    uint8_t buf[128];
-    ip_endp_t remote;
-    ssize_t n;
-    char endp[IP_ENDP_STR_LEN];
-
-    debugf("running...");
-    desc = *(int *)arg;
-    while (!terminate)
-    {
-        n = udp_cmd_recvfrom(desc, buf, sizeof(buf), &remote);
-        if (n == -1)
-        {
-            if (errno == EINTR)
-            {
-                continue;
-            }
-            warnf("udp_cmd_recvfrom() failure");
-            break;
-        }
-        infof("%d bytes data receive from %s",
-              n, ip_endp_ntop(remote, endp, sizeof(endp)));
-        hexdump(stderr, buf, n);
-    }
-    debugf("terminate");
-    return NULL;
-}
-
 static int
 app_main(void)
 {
-    int desc, err;
-    ip_endp_t remote;
-    pthread_t tid;
-    uint8_t buf[128];
-    ssize_t n;
-    char endp[IP_ENDP_STR_LEN];
-
-    desc = udp_cmd_open();
-    if (desc == -1)
-    {
-        errorf("udp_open() failure");
-        return -1;
-    }
-    err = pthread_create(&tid, NULL, receiver, (void *)&desc);
-    if (err)
-    {
-        errorf("pthread_create() %s", strerror(err));
-        udp_cmd_close(desc);
-        return -1;
-    }
-    ip_endp_pton("192.0.2.1:10007", &remote);
     debugf("press Ctrl+C to terminate");
     while (!terminate)
     {
-        if (!fgets((char *)buf, sizeof(buf), stdin))
-        {
-            break;
-        }
-        n = strlen((char *)buf);
-        infof("%d bytes data send to %s",
-              n, ip_endp_ntop(remote, endp, sizeof(endp)));
-        hexdump(stderr, buf, n);
-        if (udp_cmd_sendto(desc, buf, n, remote) == -1)
-        {
-            errorf("udp_cmd_sendto() failure");
-            break;
-        }
+      sleep(1);
     }
-    udp_cmd_close(desc);
-    pthread_join(tid, NULL);
     debugf("terminate");
     return 0;
 }

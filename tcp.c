@@ -79,14 +79,102 @@ tcp_opt_ntoa(uint8_t opt)
 static void
 tcp_print(const uint8_t *data, size_t len)
 {
+    struct tcp_hdr *hdr;
+    uint8_t hlen, *opt;
+    int i = 0;
+
+    flockfile(stderr);
+    hdr = (struct tcp_hdr *)data;
+    fprintf(stderr, "        src: %u\n", ntoh16(hdr->src));
+    fprintf(stderr, "        dst: %u\n", ntoh16(hdr->dst));
+    fprintf(stderr, "        seq: %u\n", ntoh16(hdr->seq));
+    fprintf(stderr, "        ack: %u\n", ntoh16(hdr->ack));
+    hlen = (hdr->off >> 4) << 2;
+    fprintf(stderr, "        off: 0x%02x (%u) (options: %ld, payload: %ld)\n",
+        hdr->off, hlen, hlen - sizeof(*hdr), len - hlen);
+    fprintf(stderr, "        flg: 0x%02x (%s)\n", hdr->flg, tcp_flg_ntoa(hdr->flg));
+    fprintf(stderr, "        wnd: %u\n", ntoh16(hdr->wnd));
+    fprintf(stderr, "        sum: 0x%04x\n", ntoh16(hdr->sum));
+    fprintf(stderr, "         up: %u\n", ntoh16(hdr->up));
+    opt = (uint8_t *)(hdr + 1);
+    while (opt < (uint8_t *)hdr + hlen)
+    {
+        if (*opt == 0)
+        {
+            fprintf(stderr, "    opt[%d]: kind=%u (%s)\n",
+                i++, *opt, tcp_opt_ntoa(*opt));
+            break;
+        }
+        if (*opt == 1)
+        {
+            fprintf(stderr, "    opt[%d]: kind=%u (%s)\n",
+                i++, *opt, tcp_opt_ntoa(*opt));
+            opt++;
+        }
+        else
+        {
+            fprintf(stderr, "    opt[%d]: kind=%u (%s), len=%u\n",
+                i++, *opt, tcp_opt_ntoa(*opt), *(opt + 1));
+            opt += *(opt + 1);
+        }
+    }
+#ifdef HEXDUMP
+    hexdump(stderr, data, len);
+#endif
+    funlockfile(stderr);
 }
 
 static void
 tcp_input(const struct ip_hdr *iphdr, const uint8_t *data, size_t len, struct ip_iface *iface)
 {
+    struct tcp_hdr *hdr;
+    struct pseudo_hdr pseudo;
+    uint16_t psum;
+    ip_endp_t src, dst;
+    char ep1[IP_ENDP_STR_LEN];
+    char ep2[IP_ENDP_STR_LEN];
+
+    if (len < sizeof(*hdr))
+    {
+        errorf("too short");
+        return;
+    }
+    hdr = (struct tcp_hdr *)data;
+    pseudo.src = iphdr->src;
+    pseudo.dst = iphdr->dst;
+    pseudo.zero = 0;
+    pseudo.protocol = IP_PROTOCOL_TCP;
+    pseudo.len = hton16(len);
+    psum = ~cksum16((uint16_t *)&pseudo, sizeof(pseudo), 0);
+    if (cksum16((uint16_t *)hdr, len, psum) != 0)
+    {
+        errorf("checksum error");
+        return;
+    }
+    src.addr = iphdr->src;
+    src.port = hdr->src;
+    dst.addr = iphdr->dst;
+    dst.port = hdr->dst;
+    ip_endp_ntop(src, ep1, sizeof(ep1));
+    ip_endp_ntop(dst, ep2, sizeof(ep2));
+    if (src.addr == IP_ADDR_BROADCAST || src.addr == iface->broadcast ||
+        dst.addr == IP_ADDR_BROADCAST || dst.addr == iface->broadcast)
+    {
+        errorf("only supports unicast, src=%s, dst=%s", ep1, ep2);
+        return;
+    }
+    debugf("%s => %s, len=%zu, dev=%s", ep1, ep2, len, NET_IFACE(iface)->dev->name);
+    tcp_print(data, len);
+    return;
 }
 
 int
 tcp_init(void)
 {
+    if (ip_protocol_register(IP_PROTOCOL_TCP, tcp_input) == -1)
+    {
+        errorf("ip_protocol_register() failure");
+        return -1;
+    }
+    return 0;
 }
