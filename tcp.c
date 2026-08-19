@@ -366,6 +366,19 @@ tcp_output_segment(uint32_t seq, uint32_t ack, uint8_t flg, uint16_t wnd,
 static ssize_t
 tcp_output(struct tcp_pcb *pcb, uint8_t flg, const uint8_t *data, size_t len)
 {
+    uint32_t seq;
+
+    seq = pcb->snd.nxt;
+    if (TCP_FLG_ISSET(flg, TCP_FLG_SYN))
+    {
+        seq = pcb->iss;
+    }
+    if (TCP_FLG_ISSET(flg, TCP_FLG_SYN | TCP_FLG_FIN) || len)
+    {
+        /* TODO: add retransmission queue */
+    }
+    return tcp_output_segment(seq, pcb->rcv.nxt, flg, pcb->rcv.wnd, data, len,
+                pcb->local, pcb->remote);
 }
 
 /* rfc793 - section 3.9 [Event Processing > SEGMENT ARRIVES] */
@@ -394,20 +407,45 @@ tcp_segment_arrives(struct seg_info *seg, uint8_t flags, const uint8_t *data, si
         }
         return;
     }
+    debugf("desc=%d, state=%s", tcp_pcb_desc(pcb), tcp_state_ntoa(pcb->state));
     switch (pcb->state) {
     case TCP_STATE_LISTEN:
         /*
          * 1st check for an RST
          */
-
+        if (TCP_FLG_ISSET(flags, TCP_FLG_RST))
+        {
+            return;
+        }
         /*
          * 2nd check for an ACK
          */
-
+        if (TCP_FLG_ISSET(flags, TCP_FLG_ACK))
+        {
+            tcp_output_segment(seg->ack, 0, TCP_FLG_RST, 0, NULL, 0, local, remote);
+            return;
+        }
         /*
          * 3rd check for an SYN
         */
-
+        if (TCP_FLG_ISSET(flags, TCP_FLG_SYN))
+        {
+            /* ignore: security/compartment check */
+            pcb->local = local;
+            pcb->remote = remote;
+            pcb->rcv.wnd = sizeof(pcb->buf);
+            pcb->rcv.nxt = seg->seq + 1;
+            pcb->irs = seg->seq;
+            pcb->iss = random();
+            tcp_output(pcb, TCP_FLG_SYN | TCP_FLG_ACK, NULL, 0);
+            pcb->snd.nxt = pcb->iss + 1;
+            pcb->snd.una = pcb->iss;
+            TCP_STATE_CHANGE(pcb, TCP_STATE_SYN_RECEIVED);
+            /* ignore: Note that any other incoming control or data */
+            /* (combined with SYN) will be processed in the SYN-RECEIVED state, */
+            /* but processing of SYN and ACK  should not be repeated */
+            return;
+        }
         /*
          * 4th other text or control
          */
@@ -461,7 +499,26 @@ tcp_segment_arrives(struct seg_info *seg, uint8_t flags, const uint8_t *data, si
     /*
      * 5th check the ACK field
      */
-
+    if (TCP_FLG_ISSET(flags, TCP_FLG_ACK))
+    {
+        /* drop segment */
+        return;
+    }
+    switch (pcb->state)
+    {
+        case TCP_STATE_SYN_RECEIVED:
+            if (pcb->snd.una <= seg->ack && seg->ack <= pcb->snd.nxt)
+            {
+                TCP_STATE_CHANGE(pcb, TCP_STATE_ESTABLISHED);
+                sched_task_wakeup(&pcb->task);
+            }
+            else
+            {
+                tcp_output_segment(seg->ack, 0, TCP_FLG_RST, 0, NULL, 0, local, remote);
+                return;
+            }
+        break;
+    }
     /*
      * 6th, check the URG bit (ignore)
      */
@@ -557,9 +614,105 @@ int tcp_init(void)
 int
 tcp_cmd_open(ip_endp_t local, ip_endp_t remote, int active)
 {
+    struct tcp_pcb *pcb;
+    char ep1[IP_ENDP_STR_LEN];
+    char ep2[IP_ENDP_STR_LEN];
+    int state, desc;
+    struct ip_iface *iface;
+
+    lock_acquire(&lock);
+    pcb = tcp_pcb_alloc();
+    if (!pcb)
+    {
+        errorf("tcp_pcb_alloc() failure");
+        lock_release(&lock);
+        return -1;
+    }
+    debugf("mode=%s, local=%s, remote=%s",
+        active ? "active" : "passive",
+        ip_endp_ntop(local, ep1, sizeof(ep1)),
+        ip_endp_ntop(remote, ep2, sizeof(ep2)));
+    if (active)
+    {
+        errorf("active open does not implement");
+        tcp_pcb_release(pcb);
+        lock_release(&lock);
+        return -1;
+    }
+    else
+    {
+        if (tcp_pcb_select(local, remote))
+        {
+            errorf("address already in use");
+            tcp_pcb_release(pcb);
+            lock_release(&lock);
+            return -1;
+        }
+        pcb->local = local;
+        pcb->remote = remote;
+        TCP_STATE_CHANGE(pcb, TCP_STATE_LISTEN);
+        debugf("waiting for connection...");
+    }
+AGAIN:
+    state = pcb->state;
+    /* waiting for state changed */
+    while (pcb->state == state)
+    {
+        if (sched_task_sleep(&pcb->task, &lock, NULL) == -1)
+        {
+            debugf("interrupted");
+            TCP_STATE_CHANGE(pcb, TCP_STATE_CLOSED);
+            tcp_pcb_release(pcb);
+            lock_release(&lock);
+            errno = EINTR;
+            return -1;
+        }
+    }
+    if (pcb->state != TCP_STATE_ESTABLISHED)
+    {
+        if (pcb->state == TCP_STATE_SYN_RECEIVED)
+        {
+            goto AGAIN;
+        }
+        errorf("open error: state=%s (%d)", tcp_state_ntoa(pcb->state), pcb->state);
+        TCP_STATE_CHANGE(pcb, TCP_STATE_CLOSED);
+        tcp_pcb_release(pcb);
+        lock_release(&lock);
+        return -1;
+    }
+    iface = ip_route_get_iface(pcb->remote.addr);
+    if (!iface)
+    {
+        errorf("iface not found");
+        lock_release(&lock);
+        return -1;
+    }
+    pcb->mss = NET_IFACE(iface)->dev->mtu - (IP_HDR_SIZE_MIN + sizeof(struct tcp_hdr));
+    desc = tcp_pcb_desc(pcb);
+    debugf("success, local=%s, remote=%s",
+        ip_endp_ntop(pcb->local, ep1, sizeof(ep1)),
+        ip_endp_ntop(pcb->remote, ep2, sizeof(ep2)));
+    lock_release(&lock);
+    return desc;
 }
 
 int
 tcp_cmd_close(int desc)
 {
+    struct tcp_pcb *pcb;
+
+    lock_acquire(&lock);
+    pcb = tcp_pcb_get(desc);
+    if (!pcb)
+    {
+        errorf("pcb not found, desc=%d", desc);
+        lock_release(&lock);
+        return -1;
+    }
+    debugf("desc=%d", desc);
+    tcp_output(pcb, TCP_FLG_RST, NULL, 0);
+    TCP_STATE_CHANGE(pcb, TCP_STATE_CLOSED);
+    tcp_pcb_release(pcb);
+    lock_release(&lock);
+    return 0;
 }
