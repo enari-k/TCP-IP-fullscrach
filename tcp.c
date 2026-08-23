@@ -104,6 +104,7 @@ struct tcp_pcb
     uint8_t buf[65535]; /* receive buffer */
     struct sched_task task;
     struct queue queue; /* retransmit queue */
+    struct timeval tw_timer;
 };
 
 struct tcp_queue_entry {
@@ -506,6 +507,9 @@ tcp_output(struct tcp_pcb *pcb, uint8_t flg, const uint8_t *data, size_t len)
 static void
 tcp_set_timewait_timer(struct tcp_pcb *pcb)
 {
+    gettimeofday(&pcb->tw_timer, NULL);
+    pcb->tw_timer.tv_sec += TCP_TIMEWAIT_SEC;
+    debugf("start time_wait timer: %d second", TCP_TIMEWAIT_SEC);
 }
 
 /* rfc793 - section 3.9 [Event Processing > SEGMENT ARRIVES] */
@@ -651,8 +655,11 @@ tcp_segment_arrives(struct seg_info *seg, uint8_t flags, const uint8_t *data, si
     {
     case TCP_STATE_SYN_RECEIVED:
     case TCP_STATE_ESTABLISHED:
+    case TCP_STATE_FIN_WAIT1:
+    case TCP_STATE_FIN_WAIT2:
     case TCP_STATE_CLOSE_WAIT:
     case TCP_STATE_LAST_ACK:
+    case TCP_STATE_TIME_WAIT:
         if (!seg->len)
         {
             if (!pcb->rcv.wnd)
@@ -739,6 +746,8 @@ tcp_segment_arrives(struct seg_info *seg, uint8_t flags, const uint8_t *data, si
             }
             /* fall through */
         case TCP_STATE_ESTABLISHED:
+        case TCP_STATE_FIN_WAIT1:
+        case TCP_STATE_FIN_WAIT2:
         case TCP_STATE_CLOSE_WAIT:
             if (pcb->snd.una < seg->ack && seg->ack <= pcb->snd.nxt)
             {
@@ -765,6 +774,15 @@ tcp_segment_arrives(struct seg_info *seg, uint8_t flags, const uint8_t *data, si
             }
             switch (pcb->state)
             {
+            case TCP_STATE_FIN_WAIT1:
+                if (seg->ack == pcb->snd.nxt)
+                {
+                    TCP_STATE_CHANGE(pcb, TCP_STATE_FIN_WAIT2);
+                }
+                break;
+            case TCP_STATE_FIN_WAIT2:
+                /* do not delete the TCB */
+                break;
             case TCP_STATE_CLOSE_WAIT:
                 /* do nothing */
                 break;
@@ -777,6 +795,12 @@ tcp_segment_arrives(struct seg_info *seg, uint8_t flags, const uint8_t *data, si
             tcp_pcb_release(pcb);
         }
         return;
+    case TCP_STATE_TIME_WAIT:
+        if (TCP_FLG_ISSET(flags, TCP_FLG_FIN))
+        {
+            tcp_set_timewait_timer(pcb); /* restart time-wait timer */
+        }
+        break;
     }
     /*
      * 6th, check the URG bit (ignore)
@@ -788,6 +812,8 @@ tcp_segment_arrives(struct seg_info *seg, uint8_t flags, const uint8_t *data, si
     switch (pcb->state)
     {
     case TCP_STATE_ESTABLISHED:
+    case TCP_STATE_FIN_WAIT1:
+    case TCP_STATE_FIN_WAIT2:
         if (len)
         {
             if (pcb->rcv.nxt != seg->seq || pcb->rcv.wnd < len)
@@ -806,6 +832,7 @@ tcp_segment_arrives(struct seg_info *seg, uint8_t flags, const uint8_t *data, si
         break;
     case TCP_STATE_CLOSE_WAIT:
     case TCP_STATE_LAST_ACK:
+    case TCP_STATE_TIME_WAIT:
         /* ignore segment text */
         break;
     }
@@ -830,11 +857,21 @@ tcp_segment_arrives(struct seg_info *seg, uint8_t flags, const uint8_t *data, si
             TCP_STATE_CHANGE(pcb, TCP_STATE_CLOSE_WAIT);
             sched_task_wakeup(&pcb->task);
             break;
+        case TCP_STATE_FIN_WAIT1:
+            /* TODO: simulaneous close */
+            break;
+        case TCP_STATE_FIN_WAIT2:
+            TCP_STATE_CHANGE(pcb, TCP_STATE_TIME_WAIT);
+            tcp_set_timewait_timer(pcb);
+            break;
         case TCP_STATE_CLOSE_WAIT:
             /* Remain in the CLOSE-WAIT state */
             break;
         case TCP_STATE_LAST_ACK:
             /* Remain inthe LAST-ACK state */
+            break;
+        case TCP_STATE_TIME_WAIT:
+            /* Remain in the TIME-WAIT state */
             break;
         }
     }
@@ -907,14 +944,28 @@ tcp_input(const struct ip_hdr *iphdr, const uint8_t *data, size_t len, struct ip
 static void
 tcp_timer(void)
 {
+    struct timeval now;
     struct tcp_pcb *pcb;
 
     lock_acquire(&lock);
+    gettimeofday(&now, NULL);
     for (pcb = pcbs; pcb < tailof(pcbs); pcb++)
     {
         if (pcb->state == TCP_STATE_NONE)
         {
             continue;
+        }
+        if (pcb->state == TCP_STATE_TIME_WAIT)
+        {
+            if (now.tv_sec > pcb->tw_timer.tv_sec ||
+                (now.tv_sec == pcb->tw_timer.tv_sec &&
+                 now.tv_usec > pcb->tw_timer.tv_usec))
+            {
+                debugf("timewait has elapsed, desc=%d", tcp_pcb_desc(pcb));
+                TCP_STATE_CHANGE(pcb, TCP_STATE_CLOSED);
+                tcp_pcb_release(pcb);
+                continue;
+            }
         }
         queue_foreach(&pcb->queue, tcp_retrans_emit, pcb);
     }
@@ -1108,8 +1159,10 @@ tcp_cmd_close(int desc)
         break;
     case TCP_STATE_SYN_RECEIVED:
     case TCP_STATE_ESTABLISHED:
-        tcp_output(pcb, TCP_FLG_RST, NULL, 0);
-        TCP_STATE_CHANGE(pcb, TCP_STATE_CLOSED);
+        debugf("close connection");
+        tcp_output(pcb, TCP_FLG_ACK | TCP_FLG_FIN, NULL, 0);
+        pcb->snd.nxt++;
+        TCP_STATE_CHANGE(pcb, TCP_STATE_FIN_WAIT1);
         break;
     case TCP_STATE_CLOSE_WAIT:
         debugf("close connection");
@@ -1117,7 +1170,10 @@ tcp_cmd_close(int desc)
         pcb->snd.nxt++;
         TCP_STATE_CHANGE(pcb, TCP_STATE_LAST_ACK);
         break;
+    case TCP_STATE_FIN_WAIT1:
+    case TCP_STATE_FIN_WAIT2:
     case TCP_STATE_LAST_ACK:
+    case TCP_STATE_TIME_WAIT:
         errorf("connection closing");
         lock_release(&lock);
         return -1;
@@ -1189,7 +1245,10 @@ RETRY:
             sent += slen;
         }
         break;
+    case TCP_STATE_FIN_WAIT1:
+    case TCP_STATE_FIN_WAIT2:
     case TCP_STATE_LAST_ACK:
+    case TCP_STATE_TIME_WAIT:
         errorf("connection closing");
         lock_release(&lock);
         return -1;
@@ -1220,6 +1279,8 @@ RETRY:
     switch (pcb->state)
     {
     case TCP_STATE_ESTABLISHED:
+    case TCP_STATE_FIN_WAIT1:
+    case TCP_STATE_FIN_WAIT2:
         remain = sizeof(pcb->buf) - pcb->rcv.wnd;
         if (!remain)
         {
@@ -1241,6 +1302,7 @@ RETRY:
         }
         /* fall through */
     case TCP_STATE_LAST_ACK:
+    case TCP_STATE_TIME_WAIT:
         debugf("connection closing");
         lock_release(&lock);
         return 0;
