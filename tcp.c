@@ -645,6 +645,8 @@ tcp_segment_arrives(struct seg_info *seg, uint8_t flags, const uint8_t *data, si
     {
     case TCP_STATE_SYN_RECEIVED:
     case TCP_STATE_ESTABLISHED:
+    case TCP_STATE_CLOSE_WAIT:
+    case TCP_STATE_LAST_ACK:
         if (!seg->len)
         {
             if (!pcb->rcv.wnd)
@@ -731,6 +733,7 @@ tcp_segment_arrives(struct seg_info *seg, uint8_t flags, const uint8_t *data, si
             }
             /* fall through */
         case TCP_STATE_ESTABLISHED:
+        case TCP_STATE_CLOSE_WAIT:
             if (pcb->snd.una < seg->ack && seg->ack <= pcb->snd.nxt)
             {
                 pcb->snd.una = seg->ack;
@@ -754,7 +757,20 @@ tcp_segment_arrives(struct seg_info *seg, uint8_t flags, const uint8_t *data, si
                 tcp_output(pcb, TCP_FLG_ACK, NULL, 0);
                 return;
             }
+            switch (pcb->state)
+            {
+            case TCP_STATE_CLOSE_WAIT:
+                /* do nothing */
+                break;
+            }
         break;
+    case TCP_STATE_LAST_ACK:
+        if (seg->ack == pcb->snd.nxt)
+        {
+            TCP_STATE_CHANGE(pcb, TCP_STATE_CLOSED);
+            tcp_pcb_release(pcb);
+        }
+        return;
     }
     /*
      * 6th, check the URG bit (ignore)
@@ -782,10 +798,40 @@ tcp_segment_arrives(struct seg_info *seg, uint8_t flags, const uint8_t *data, si
             sched_task_wakeup(&pcb->task);
         }
         break;
+    case TCP_STATE_CLOSE_WAIT:
+    case TCP_STATE_LAST_ACK:
+        /* ignore segment text */
+        break;
     }
     /*
      * 8th, check the FIN bit
      */
+    if (TCP_FLG_ISSET(flags, TCP_FLG_FIN))
+    {
+        switch (pcb->state)
+        {
+        case TCP_STATE_CLOSED:
+        case TCP_STATE_LISTEN:
+            /* drop segment */
+            return;
+        }
+        pcb->rcv.nxt = seg->seq + 1;
+        tcp_output(pcb, TCP_FLG_ACK, NULL, 0);
+        switch (pcb->state)
+        {
+        case TCP_STATE_SYN_RECEIVED:
+        case TCP_STATE_ESTABLISHED:
+            TCP_STATE_CHANGE(pcb, TCP_STATE_CLOSE_WAIT);
+            sched_task_wakeup(&pcb->task);
+            break;
+        case TCP_STATE_CLOSE_WAIT:
+            /* Remain in the CLOSE-WAIT state */
+            break;
+        case TCP_STATE_LAST_ACK:
+            /* Remain inthe LAST-ACK state */
+            break;
+        }
+    }
     return;
 }
 
@@ -1044,9 +1090,44 @@ tcp_cmd_close(int desc)
         return -1;
     }
     debugf("desc=%d", desc);
-    tcp_output(pcb, TCP_FLG_RST, NULL, 0);
-    TCP_STATE_CHANGE(pcb, TCP_STATE_CLOSED);
-    tcp_pcb_release(pcb);
+    switch (pcb->state)
+    {
+    case TCP_STATE_CLOSED:
+        errorf("connection does not exist");
+        lock_release(&lock);
+        return -1;
+    case TCP_STATE_LISTEN:
+    case TCP_STATE_SYN_SENT:
+        TCP_STATE_CHANGE(pcb, TCP_STATE_CLOSED);
+        break;
+    case TCP_STATE_SYN_RECEIVED:
+    case TCP_STATE_ESTABLISHED:
+        tcp_output(pcb, TCP_FLG_RST, NULL, 0);
+        TCP_STATE_CHANGE(pcb, TCP_STATE_CLOSED);
+        break;
+    case TCP_STATE_CLOSE_WAIT:
+        debugf("close connection");
+        tcp_output(pcb, TCP_FLG_ACK | TCP_FLG_FIN, NULL, 0);
+        pcb->snd.nxt++;
+        TCP_STATE_CHANGE(pcb, TCP_STATE_LAST_ACK);
+        break;
+    case TCP_STATE_LAST_ACK:
+        errorf("connection closing");
+        lock_release(&lock);
+        return -1;
+    default:
+        errorf("unknown state '%u'", pcb->state);
+        lock_release(&lock);
+        return -1;
+    }
+    if (pcb->state == TCP_STATE_CLOSED)
+    {
+        tcp_pcb_release(pcb);
+    }
+    else
+    {
+        sched_task_wakeup(&pcb->task);
+    }
     lock_release(&lock);
     return 0;
 }
@@ -1070,6 +1151,7 @@ RETRY:
     switch (pcb->state)
     {
     case TCP_STATE_ESTABLISHED:
+    case TCP_STATE_CLOSE_WAIT:
         while (sent < (ssize_t)len)
         {
             cap = pcb->snd.wnd - (pcb->snd.nxt - pcb->snd.una);
@@ -1101,6 +1183,10 @@ RETRY:
             sent += slen;
         }
         break;
+    case TCP_STATE_LAST_ACK:
+        errorf("connection closing");
+        lock_release(&lock);
+        return -1;
     default:
         errorf("invalid state '%u'", pcb->state);
         lock_release(&lock);
@@ -1141,6 +1227,17 @@ RETRY:
             goto RETRY;
         }
         break;
+    case TCP_STATE_CLOSE_WAIT:
+        remain = sizeof(pcb->buf) - pcb->rcv.wnd;
+        if (remain)
+        {
+            break;
+        }
+        /* fall through */
+    case TCP_STATE_LAST_ACK:
+        debugf("connection closing");
+        lock_release(&lock);
+        return 0;
     default:
         errorf("unknown state '%u'", pcb->state);
         lock_release(&lock);
