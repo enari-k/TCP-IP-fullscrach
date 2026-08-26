@@ -310,11 +310,21 @@ int sock_accept(int desc, struct sockaddr *addr, int *addrlen)
         switch (sock.type)
         {
         case SOCK_STREAM:
-            ret = tcp_cmd_accept(sock.desc, &remote);
-            if (ret == -1)
+            lock_acquire(&lock);
+            new_s = sock_alloc();
+            if (!new_s)
             {
                 return -1;
             }
+            ret = tcp_cmd_accept(sock.desc, &remote);
+            if (ret == -1)
+            {
+                sock_free(new_s);
+                return -1;
+            }
+            new_s->family = sock.family;
+            new_s->type = sock.type;
+            new_s->desc = ret;
             if (addr && addrlen)
             {
                 ((struct sockaddr_in *)addr)->sin_family = sock.family;
@@ -322,11 +332,6 @@ int sock_accept(int desc, struct sockaddr *addr, int *addrlen)
                 ((struct sockaddr_in *)addr)->sin_port = remote.port;
                 *addrlen = sizeof(struct sockaddr_in);
             }
-            lock_acquire(&lock);
-            new_s = sock_alloc();
-            new_s->family = sock.family;
-            new_s->type = sock.type;
-            new_s->desc = ret;
             new_desc = indexof(socks, new_s);
             lock_release(&lock);
             return new_desc;
