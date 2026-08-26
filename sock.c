@@ -10,7 +10,8 @@
 #include "tcp.h"
 #include "sock.h"
 
-struct sock {
+struct sock
+{
     int used;
     int family;
     int type;
@@ -58,8 +59,7 @@ sock_get(int desc)
     return NULL;
 }
 
-int
-sock_open(int domain, int type, int protocol)
+int sock_open(int domain, int type, int protocol)
 {
     struct sock *s;
     int desc;
@@ -113,8 +113,7 @@ sock_open(int domain, int type, int protocol)
     return desc;
 }
 
-int
-sock_close(int desc)
+int sock_close(int desc)
 {
     struct sock *s, sock;
 
@@ -125,16 +124,17 @@ sock_close(int desc)
         lock_release(&lock);
         return -1;
     }
+    sock = *s;
     switch (sock.family)
     {
     case AF_INET:
         switch (s->type)
         {
         case SOCK_STREAM:
-            tcp_cmd_close(s->desc);
+            tcp_cmd_close(sock.desc);
             break;
         case SOCK_DGRAM:
-            udp_cmd_close(s->desc);
+            udp_cmd_close(sock.desc);
             break;
         default:
             warnf("unknown type %d", sock.type);
@@ -171,7 +171,7 @@ sock_recvfrom(int desc, void *buf, size_t n, struct sockaddr *addr, int *addrlen
         switch (s->type)
         {
         case SOCK_DGRAM:
-            ret = udp_cmd_recvfrom(s->desc, (uint8_t *)buf, n, &remote);
+            ret = udp_cmd_recvfrom(sock.desc, (uint8_t *)buf, n, &remote);
             if (addr && addrlen)
             {
                 ((struct sockaddr_in *)addr)->sin_addr.s_addr = remote.addr;
@@ -181,7 +181,7 @@ sock_recvfrom(int desc, void *buf, size_t n, struct sockaddr *addr, int *addrlen
             return ret;
         default:
             errorf("unsupported type %d", sock.type);
-            return -1;    
+            return -1;
         }
     default:
         errorf("unsupported family %d", sock.family);
@@ -223,8 +223,7 @@ sock_sendto(int desc, const void *buf, size_t n, const struct sockaddr *addr, in
     }
 }
 
-int
-sock_bind(int desc, const struct sockaddr *addr, int addrlen)
+int sock_bind(int desc, const struct sockaddr *addr, int addrlen)
 {
     struct sock *s, sock;
     ip_endp_t local;
@@ -259,8 +258,7 @@ sock_bind(int desc, const struct sockaddr *addr, int addrlen)
     }
 }
 
-int
-sock_listen(int desc, int backlog)
+int sock_listen(int desc, int backlog)
 {
     struct sock *s, sock;
 
@@ -290,8 +288,7 @@ sock_listen(int desc, int backlog)
     }
 }
 
-int
-sock_accept(int desc, struct sockaddr *addr, int *addrlen)
+int sock_accept(int desc, struct sockaddr *addr, int *addrlen)
 {
     struct sock *s, sock, *new_s;
     ip_endp_t remote;
@@ -342,8 +339,7 @@ sock_accept(int desc, struct sockaddr *addr, int *addrlen)
     }
 }
 
-int
-sock_connect(int desc, const struct sockaddr *addr, int addrlen)
+int sock_connect(int desc, const struct sockaddr *addr, int addrlen)
 {
     struct sock *s, sock;
     ip_endp_t remote;
@@ -419,7 +415,7 @@ sock_send(int desc, const void *buf, size_t n)
         lock_release(&lock);
         return -1;
     }
-    sock =*s;
+    sock = *s;
     lock_release(&lock);
     switch (sock.family)
     {
