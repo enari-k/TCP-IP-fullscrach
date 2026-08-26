@@ -105,6 +105,7 @@ int sock_open(int domain, int type, int protocol)
     }
     if (s->desc == -1)
     {
+        sock_free(s);
         lock_release(&lock);
         return -1;
     }
