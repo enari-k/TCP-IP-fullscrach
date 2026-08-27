@@ -47,16 +47,19 @@ sock_free(struct sock *s)
 static struct sock *
 sock_get(int desc)
 {
-    struct sock *entry;
+    struct sock *s;
 
-    for (entry = socks; entry < tailof(socks); entry++)
+    if (desc < 0 || desc >= (int)countof(socks))
     {
-        if (entry->desc == desc)
-        {
-            return entry;
-        }
+        /* out of range */
+        return NULL;
     }
-    return NULL;
+    s = &socks[desc];
+    if (!s->used)
+    {
+        return NULL;
+    }
+    return s;
 }
 
 int sock_open(int domain, int type, int protocol)
