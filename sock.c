@@ -19,7 +19,7 @@ struct sock
 };
 
 static lock_t lock = LOCK_INITIALIZER;
-static struct sock socks[32];
+static struct sock socks[4097];
 
 static struct sock *
 sock_alloc(void)
@@ -319,12 +319,14 @@ int sock_accept(int desc, struct sockaddr *addr, int *addrlen)
             {
                 return -1;
             }
+            lock_release(&lock);
             ret = tcp_cmd_accept(sock.desc, &remote);
             if (ret == -1)
             {
                 sock_free(new_s);
                 return -1;
             }
+            lock_acquire(&lock);
             new_s->family = sock.family;
             new_s->type = sock.type;
             new_s->desc = ret;

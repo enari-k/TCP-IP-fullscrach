@@ -24,7 +24,7 @@
 #define TCP_FLG_IS(x, y) ((x & 0x3f) == (y))
 #define TCP_FLG_ISSET(x, y) ((x & 0x3f) & (y) ? 1 : 0)
 
-#define TCP_PCB_SIZE 16
+#define TCP_PCB_SIZE 4096
 
 #define TCP_STATE_NONE 0
 #define TCP_STATE_CLOSED 1

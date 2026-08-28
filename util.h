@@ -40,24 +40,24 @@
 /*
  * Logging
  */
-
-#define logf(lv, fmt, ...) lprintf(stderr, lv, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+#define logf(lv, fmt, ...) \
+    lprintf(stderr, lv, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 
 #define errorf(fmt, ...) logf('E', fmt, ##__VA_ARGS__)
-#define warnf(fmt, ...)  logf('W', fmt, ##__VA_ARGS__)
-#define infof(fmt, ...)  logf('I', fmt, ##__VA_ARGS__)
+#define warnf(fmt, ...) logf('W', fmt, ##__VA_ARGS__)
+#define infof(fmt, ...) logf('I', fmt, ##__VA_ARGS__)
+
+#ifdef DISABLE_DEBUG_LOG
+#define debugf(...) ((void)0)
+#else
 #define debugf(fmt, ...) logf('D', fmt, ##__VA_ARGS__)
+#endif
 
 #ifdef HEXDUMP
 #define debugdump(...) hexdump(stderr, __VA_ARGS__)
 #else
 #define debugdump(...)
 #endif
-
-extern int
-lprintf(FILE *fp, int level, const char *file, int line, const char *func, const char *fmt, ...);
-extern void
-hexdump(FILE *fp, const void *data, size_t size);
 
 /*
  * Queue
